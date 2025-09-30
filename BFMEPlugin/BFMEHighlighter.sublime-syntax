@@ -3,20 +3,19 @@
 # See http://www.sublimetext.com/docs/3/syntax.html
 name: SageINI
 file_extensions: [ini, inc]
-scope: source.example-c
+scope: source.sageini
 
 contexts:
   # The prototype context is prepended to all contexts but those setting
-  # meta_include_prototype: false.
-  prototype:
-    - include: comments
-
+  # meta_include_prototype: false.    
   main:
     # The main context is the initial starting point of our syntax.
     # Include other contexts from here (or specify them directly).
     - include: keywords
     - include: numbers
     - include: strings
+    - include: comments
+    - include: booleans
 
   keywords:
     # Keywords are if, else for and while.
@@ -24,35 +23,46 @@ contexts:
     # strings in YAML. When using single quoted strings, only single quotes
     # need to be escaped: this is done by using two single quotes next to each
     # other.
+
+    # End keyword (case-insensitive) only at start of line or after whitespace
     - match: '(?i)\bEnd\b'
-      scope: keyword.control.end.example-c
+      scope: keyword.control.end.sageini
+
+    # Other keywords (case-sensitive) only at start of line
+    - match: '^(AudioEvent|MappedImage|Object|ChildObject|ObjectCreationList|ModifierList|FXList|FXParticleSystem|Locomotor|Upgrade|Science|StanceTemplate|CommandSet|CommandButton|Weapon|Armor|SpecialPower)\b'
+      scope: keyword.control.block.sageini
 
   numbers:
     - match: '\b(-)?[0-9.]+\b'
-      scope: constant.numeric.example-c
+      scope: constant.numeric.sageini
+
+  booleans:
+    # Match Yes/No at start or after whitespace, case-insensitive
+    - match: '\b(?i:Yes|No)\b'
+      scope: constant.language.boolean.sageini
 
   strings:
     # Strings begin and end with quotes, and use backslashes as an escape
     # character.
     - match: '"'
-      scope: punctuation.definition.string.begin.example-c
+      scope: punctuation.definition.string.begin.sageini
       push: inside_string
 
   inside_string:
     - meta_include_prototype: false
-    - meta_scope: string.quoted.double.example-c
+    - meta_scope: string.quoted.double
     - match: '\.'
-      scope: constant.character.escape.example-c
+      scope: constant.character.escape
     - match: '"'
-      scope: punctuation.definition.string.end.example-c
+      scope: punctuation.definition.string.end.sageini
       pop: true
 
   comments:
     # Comments begin with a '//' and finish at the end of the line.
     - match: '(//|;)'
-      scope: punctuation.definition.comment.example-c
+      scope: punctuation.definition.comment.sageini
       push:
         # This is an anonymous context push for brevity.
-        - meta_scope: comment.line.double-slash.example-c
+        - meta_scope: comment.line.double-slash.sageini
         - match: $\n?
           pop: true

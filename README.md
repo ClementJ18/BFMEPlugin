@@ -8,10 +8,12 @@ When you open Sublime Text or if you've made a lot of changes, you may want to r
 ## Features
 Once you have indexed you mod you have access to the following functionalities:
 - Go To Definition: Select a word and then right click -> Go To Definition to go to the source of that reference. E.g Using this on a button a commandset will take you to the commandbutton definition. This also works for strings. Make sure that your text cursor is on the correct word
+- Go To Include: Follow an include statement to the correct file
 - Symbol Browser: List of all indexed symbols, allows you to filter by type or just search
 - Macro Preview: When hovering on a macro, the plugin will display the indexed value of that macro
+- Basic Highlighting: Once installed you can select SageIni from the list of file types in the bottom right corner
 
-This small plugin is experimental, it will probably change often. 
+This small plugin is experimental, it will probably change. 
 
 ## Installing
 - Download `BFMEPlugin.sublime-package`

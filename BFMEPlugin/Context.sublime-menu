@@ -1,6 +1,5 @@
 [
     { "caption": "BFME: Go to Definition", "command": "goto_bfme_definition" },
     { "caption": "BFME: Reindex Project", "command": "bfme_index_project" },
-    { "caption": "BFME: Quick Lookup", "command": "bfme_quick_lookup" },
     { "caption": "BFME: Symbol Browser", "command": "bfme_symbol_browser" }
 ]
