@@ -170,8 +170,7 @@ class GotoBfmeDefinitionCommand(sublime_plugin.TextCommand):
                         # Multiple definitions - show quick panel to choose
                         items = []
                         for i, (p, line_num) in enumerate(zip(path, line)):
-                            filename = os.path.basename(p)
-                            items.append("{lookup} in {filename} (line {line})".format(lookup=lookup, filename=filename, line=line_num))
+                            items.append("{lookup} in {fullpath} (line {line})".format(lookup=lookup, fullpath=p, line=line_num))
                         
                         def on_done(index):
                             if index >= 0:
@@ -254,8 +253,7 @@ class BfmeHoverListener(sublime_plugin.ViewEventListener):
                         # Multiple macro definitions - show all values
                         popup_text = "<b>{word}</b><br/>".format(word=word)
                         for i, value in enumerate(extra):
-                            filename = os.path.basename(path[i])
-                            popup_text += "• {filename}: {value}<br/>".format(filename=filename, value=value)
+                            popup_text += "• {fullpath}: {value}<br/>".format(fullpath=path[i], value=value)
                     else:
                         # Single macro definition
                         popup_text = "<b>{word}</b> = {extra[0]}".format(word=word, extra=extra)
@@ -280,8 +278,7 @@ class BfmeQuickLookupCommand(sublime_plugin.WindowCommand):
             if isinstance(path, list):
                 # Multiple definitions - add each one separately
                 for i, (p, line_num) in enumerate(zip(path, line)):
-                    filename = os.path.basename(p)
-                    display = "{name} [{kind}] - {filename}".format(name=name, kind=kind, filename=filename)
+                    display = "{name} [{kind}] - {fullpath}".format(name=name, kind=kind, fullpath=p)
                     self.items.append((display, p, line_num))
             else:
                 # Single definition
@@ -328,8 +325,7 @@ class BfmeSymbolBrowserCommand(sublime_plugin.WindowCommand):
             if isinstance(path, list):
                 # Multiple definitions - add each one separately
                 for i, (p, line_num) in enumerate(zip(path, line)):
-                    filename = os.path.basename(p)
-                    display = "{name}   ⟶   [{kind}] - {filename}".format(name=name, kind=kind, filename=filename)
+                    display = "{name}   ⟶   [{kind}] - {fullpath}".format(name=name, kind=kind, fullpath=p)
                     self.items.append((display, p, line_num))
             else:
                 # Single definition
