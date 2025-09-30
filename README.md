@@ -1,4 +1,4 @@
-## BFME Plugin
+# BFME Plugin
 A simple plugin for BFME that allows you to traverse ini code more easily
 
 In order for this to work you should add you entire mod folder to sublime text so that the plugin can crawl it.
@@ -23,3 +23,6 @@ This small plugin is experimental, it will probably change.
  - If it doesn’t exist, create it manually.
 - Copy your .sublime-package file into Installed Packages/.
 - Restart Sublime Text. Your plugin should now load like a normal package.
+
+## Demo
+https://www.youtube.com/watch?v=Dj3Kp03-mco
