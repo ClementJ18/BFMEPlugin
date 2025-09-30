@@ -12,6 +12,7 @@ Once you have indexed you mod you have access to the following functionalities:
 - Symbol Browser: List of all indexed symbols, allows you to filter by type or just search
 - Macro Preview: When hovering on a macro, the plugin will display the indexed value of that macro
 - Basic Highlighting: Once installed you can select SageIni from the list of file types in the bottom right corner
+- Autocomplete: Autocomplete symbols
 
 This small plugin is experimental, it will probably change. 
 
