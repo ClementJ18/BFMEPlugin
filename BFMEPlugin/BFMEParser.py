@@ -4,6 +4,7 @@ import os
 import re
 import csv
 import threading
+from .behaviors_data import behaviors
 
 bfme_index = {}
 bfme_strings_index = {}
@@ -14,6 +15,7 @@ bfme_pattern = re.compile(
 )
 macro_pattern = re.compile(r"^\s*#define\s+([\w+\-]+)\s+([^;]+)", re.I)
 include_pattern = re.compile(r'#include\s+"([^"]+)"', re.I)
+behavior_pattern = re.compile(r'^\s*Behavior\s*=\s*(\w+)', re.I)
 
 
 def read_string_names(path):
@@ -113,6 +115,54 @@ def index_bfme_files_async(window):
         sublime.set_timeout(lambda: sublime.status_message("BFME: Indexing complete"), 0)
 
     threading.Thread(target=worker, daemon=True).start()
+
+
+def get_current_behavior_context(view, location):
+    """Find the current behavior block we're in and return behavior name."""
+    current_line = view.line(location).begin()
+    
+    behavior_name = None
+    indent_level = None
+    
+    while current_line > 0:
+        line_region = sublime.Region(current_line, view.line(current_line).end())
+        line_text = view.substr(line_region)
+        
+        stripped = line_text.strip()
+        if stripped.lower() == 'end':
+            end_indent = len(line_text) - len(line_text.lstrip())
+            if indent_level is None or end_indent <= indent_level:
+                break
+        
+        behavior_match = behavior_pattern.match(line_text)
+        if behavior_match:
+            current_indent = len(line_text) - len(line_text.lstrip())
+            if indent_level is None:
+                target_line = view.line(location)
+                target_text = view.substr(target_line)
+                target_indent = len(target_text) - len(target_text.lstrip())
+                
+                if target_indent > current_indent:
+                    behavior_name = behavior_match.group(1)
+                    indent_level = current_indent
+                break
+            elif current_indent < indent_level:
+                behavior_name = behavior_match.group(1)
+                break
+        
+        if current_line == 0:
+            break
+        current_line = view.line(current_line - 1).begin()
+    
+    return behavior_name
+
+
+def is_behavior_declaration_line(view, location):
+    """Check if we're on a line declaring a behavior (Behavior = ...)."""
+    line_region = view.line(location)
+    line_text = view.substr(line_region)
+    
+    return re.match(r'^\s*Behavior\s*=\s*', line_text, re.I) is not None
 
 
 class BfmeIndexProjectCommand(sublime_plugin.WindowCommand):
@@ -280,6 +330,47 @@ class BfmeHoverListener(sublime_plugin.ViewEventListener):
         word_region = self.view.word(point)
         word = self.view.substr(word_region)
 
+        behavior_match = behavior_pattern.match(line_text)
+        if behavior_match:
+            behavior_name = behavior_match.group(1)
+            if behavior_name in behaviors:
+                behavior_params = behaviors[behavior_name]
+                popup_text = "<b>Behavior: {name}</b><br/>".format(name=behavior_name)
+                popup_text += "<i>Parameters ({count}):</i><br/>".format(count=len(behavior_params))
+                
+                param_list = list(behavior_params.items())[:8] 
+                for param_name, param_type in param_list:
+                    popup_text += "• {param} ({type})<br/>".format(param=param_name, type=param_type)
+                
+                if len(behavior_params) > 8:
+                    popup_text += "• ... and {more} more<br/>".format(more=len(behavior_params) - 8)
+                
+                self.view.show_popup(
+                    popup_text,
+                    flags=sublime.HIDE_ON_MOUSE_MOVE_AWAY,
+                    location=point,
+                    max_width=600,
+                )
+                return
+
+        current_behavior = get_current_behavior_context(self.view, point)
+        if current_behavior and current_behavior in behaviors:
+            behavior_params = behaviors[current_behavior]
+            
+            if word in behavior_params:
+                param_type = behavior_params[word]
+                popup_text = "<b>{param}</b><br/>".format(param=word)
+                popup_text += "<i>{behavior} parameter</i><br/>".format(behavior=current_behavior)
+                popup_text += "Type: {type}".format(type=param_type)
+                
+                self.view.show_popup(
+                    popup_text,
+                    flags=sublime.HIDE_ON_MOUSE_MOVE_AWAY,
+                    location=point,
+                    max_width=600,
+                )
+                return
+
         if word in bfme_index:
             path, line, kind, extra = bfme_index[word]
             if kind == "macro":
@@ -372,6 +463,36 @@ class BfmeCompletionListener(sublime_plugin.EventListener):
         line_text = view.substr(line_region)
 
         completions = []
+
+        if is_behavior_declaration_line(view, location):
+            for behavior_name in behaviors.keys():
+                if behavior_name.lower().startswith(prefix.lower()):
+                    param_count = len(behaviors[behavior_name])
+                    completion = sublime.CompletionItem(
+                        trigger=behavior_name,
+                        completion=behavior_name,
+                        kind=sublime.KIND_TYPE,
+                        details="<b>{name}</b><br/><i>Behavior ({count} parameters)</i>".format(
+                            name=behavior_name, count=param_count
+                        ),
+                    )
+                    completions.append(completion)
+        else:
+            current_behavior = get_current_behavior_context(view, location)
+            
+            if current_behavior and current_behavior in behaviors:
+                behavior_params = behaviors[current_behavior]
+                for param_name, param_type in behavior_params.items():
+                    if param_name.lower().startswith(prefix.lower()):
+                        completion = sublime.CompletionItem(
+                            trigger=param_name,
+                            completion=param_name + " = ",
+                            kind=sublime.KIND_VARIABLE,
+                            details="<b>{param}</b><br/><i>{behavior} parameter ({type})</i>".format(
+                                param=param_name, behavior=current_behavior, type=param_type
+                            ),
+                        )
+                        completions.append(completion)
 
         context_filter = None
 
