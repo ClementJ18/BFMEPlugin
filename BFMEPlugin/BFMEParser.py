@@ -171,6 +171,150 @@ class BfmeIndexProjectCommand(sublime_plugin.WindowCommand):
         sublime.status_message("BFME: Indexing complete")
 
 
+class ShowBehaviorDocCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        sel = self.view.sel()[0]
+        
+        if sel.empty():
+            word_region = self.view.word(sel)
+            behavior_name = self.view.substr(word_region)
+        else:
+            behavior_name = self.view.substr(sel)
+        
+        behavior_name = behavior_name.strip()
+        
+        if not behavior_name:
+            sublime.status_message("BFME: No behavior name selected")
+            return
+            
+        if behavior_name not in behaviors:
+            sublime.status_message("BFME: Unknown behavior '{behavior_name}'".format(behavior_name=behavior_name))
+            return
+            
+        self.show_behavior_documentation(behavior_name)
+    
+
+
+    def show_behavior_documentation(self, behavior_name):
+        behavior_params = behaviors[behavior_name]
+        
+        html_content = """
+        <body id="behavior-doc">
+            <style>
+                body {{
+                    font-family: system;
+                    margin: 0;
+                    padding: 20px;
+                    background-color: var(--background);
+                    color: var(--foreground);
+                    line-height: 1.4;
+                }}
+                h1 {{
+                    color: var(--orangish);
+                    margin: 0 0 15px 0;
+                    font-size: 18px;
+                    border-bottom: 2px solid var(--orangish);
+                    padding-bottom: 8px;
+                }}
+                .param-count {{
+                    color: var(--orangish);
+                    font-size: 14px;
+                    margin-bottom: 20px;
+                    font-style: italic;
+                    background-color: color(var(--background) blend(var(--bluish) 10%));
+                    padding: 8px 12px;
+                    border-radius: 4px;
+                    border: 1px solid var(--bluish);
+                }}
+                .param-list {{
+                    width: 100%;
+                }}
+                .param-item {{
+                    display: flex;
+                    padding: 4px 0;
+                    border-bottom: 1px solid color(var(--background) blend(var(--foreground) 15%));
+                    margin-bottom: 2px;
+                    line-height: 1.3;
+                    white-space: nowrap;
+                }}
+                .param-name {{
+                    font-weight: bold;
+                    color: var(--bluish);
+                    font-family: monospace;
+                    font-size: 13px;
+                    flex: 0 0 250px;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }}
+                .param-type {{
+                    color: var(--greenish);
+                    font-family: monospace;
+                    font-size: 13px;
+                    flex: 1;
+                    margin-left: 10px;
+                }}
+                .param-row:hover {{
+                    background-color: color(var(--background) blend(var(--foreground) 5%));
+                }}
+                .no-params {{
+                    color: var(--foreground);
+                    font-style: italic;
+                    text-align: center;
+                    padding: 20px;
+                }}
+                .common-params {{
+                    margin-bottom: 20px;
+                }}
+                .section-header {{
+                    color: var(--orangish);
+                    font-weight: bold;
+                    margin: 20px 0 10px 0;
+                    font-size: 14px;
+                }}
+            </style>
+            <h1>Behavior: {behavior_name}</h1>
+        """.format(behavior_name=behavior_name)
+        
+        if behavior_params:
+            html_content += '<div class="param-count">📋 {count} parameters available</div>'.format(count=len(behavior_params))    
+            sorted_params = sorted(behavior_params.items())            
+            html_content += '<div class="param-list">'
+            
+            for param_name, param_type in sorted_params:
+                html_content += '<div class="param-item">'
+                html_content += '<span class="param-name">{param_name}\t\t</span>'.format(param_name=param_name)
+                html_content += '<span class="param-type">{param_type}</span>'.format(param_type=param_type)
+                html_content += '</div>'
+            
+            html_content += '</div>'
+        else:
+            html_content += '<div class="no-params">No parameters defined for this behavior.</div>'
+        
+        html_content += """
+        </body>
+        """
+        
+        self.view.show_popup(
+            html_content,
+            flags=sublime.HIDE_ON_MOUSE_MOVE_AWAY | sublime.COOPERATE_WITH_AUTO_COMPLETE,
+            location=-1,
+            max_width=1000,
+            max_height=600,
+            on_navigate=None
+        )
+        
+        sublime.status_message("BFME: Showing documentation for {behavior_name}".format(behavior_name=behavior_name))
+    
+    def is_enabled(self):
+        return True
+    
+    def is_visible(self):
+        syntax = self.view.settings().get("syntax") or ""
+        return any(
+            ext in syntax.lower() for ext in ["ini", "inc", "bfmehighlighter", "plain text"]
+        )
+
+
 class GotoBfmeDefinitionCommand(sublime_plugin.TextCommand):
     def run(self, edit):
         if not bfme_index and not bfme_strings_index:
