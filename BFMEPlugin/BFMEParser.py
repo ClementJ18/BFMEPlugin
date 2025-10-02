@@ -790,6 +790,134 @@ class BfmeCurrentFileSymbolsCommand(sublime_plugin.TextCommand):
             )
 
 
+class BfmeUsedSymbolsCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        current_file = self.view.file_name()
+        if not current_file:
+            sublime.status_message("No file currently open")
+            return
+            
+        if not bfme_index and not bfme_strings_index:
+            index_bfme_files_async(self.view.window())
+
+        file_content = self.view.substr(sublime.Region(0, self.view.size()))
+        lines = file_content.split('\n')
+        
+        external_symbols = {}
+        for symbol_name, (symbol_path, symbol_line, symbol_kind, *_) in bfme_index.items():
+            if isinstance(symbol_path, list):
+                if current_file in symbol_path:
+                    continue
+            elif symbol_path == current_file:
+                continue
+            
+            if isinstance(symbol_path, list):
+                def_path = symbol_path[0]
+                def_line = symbol_line[0] if isinstance(symbol_line, list) else symbol_line
+            else:
+                def_path = symbol_path
+                def_line = symbol_line
+            
+            external_symbols[symbol_name] = (symbol_kind, def_path, def_line)
+        
+        for symbol_name, (symbol_path, symbol_line, symbol_kind, *_) in bfme_strings_index.items():
+            if symbol_path != current_file:
+                external_symbols[symbol_name] = (symbol_kind, symbol_path, symbol_line)
+        
+        used_symbols = []
+        symbol_patterns = {}
+        
+        for line_num, line in enumerate(lines, 1):
+            stripped_line = line.strip()
+            if not stripped_line or stripped_line.startswith(';') or stripped_line.startswith('//'):
+                continue
+            
+            for symbol_name, (symbol_kind, def_path, def_line) in external_symbols.items():
+                if symbol_name in line:
+                    if symbol_name not in symbol_patterns:
+                        symbol_patterns[symbol_name] = re.compile(r'\b' + re.escape(symbol_name) + r'\b', re.IGNORECASE)
+                    
+                    if symbol_patterns[symbol_name].search(line):
+                        used_symbols.append((
+                            symbol_name, 
+                            line_num, 
+                            symbol_kind, 
+                            def_path, 
+                            def_line,
+                            stripped_line
+                        ))
+                        del external_symbols[symbol_name]
+                        break
+        
+        if not used_symbols:
+            sublime.status_message("No external symbols used in current file")
+            return
+        
+        used_symbols.sort(key=lambda x: x[1])
+        
+        self.items = []
+        for symbol_name, used_line, symbol_kind, def_path, def_line, context in used_symbols:
+            def_file = os.path.basename(def_path)
+            display = "{name} [{kind}] used on line {used_line} → defined in {file}:{def_line}".format(
+                name=symbol_name,
+                kind=symbol_kind, 
+                used_line=used_line,
+                file=def_file,
+                def_line=def_line
+            )
+            self.items.append((display, current_file, used_line, def_path, def_line))
+        
+        self.view.window().show_quick_panel(
+            [item[0] for item in self.items],
+            self.on_done,
+            sublime.KEEP_OPEN_ON_FOCUS_LOST,
+            0,
+            self.on_highlight,
+        )
+
+    def on_done(self, index):
+        if index == -1:
+            return
+        display, current_file, used_line, def_path, def_line = self.items[index]
+        
+        self.selected_item = self.items[index]
+        choices = [
+            "Go to usage (line {} in current file)".format(used_line),
+            "Go to definition (line {} in {})".format(def_line, os.path.basename(def_path))
+        ]
+        
+        self.view.window().show_quick_panel(
+            choices,
+            self.on_location_choice,
+            sublime.KEEP_OPEN_ON_FOCUS_LOST
+        )
+
+    def on_location_choice(self, index):
+        if index == -1:
+            return
+            
+        display, current_file, used_line, def_path, def_line = self.selected_item
+        
+        if index == 0:
+            self.view.window().open_file(
+                "{}:{}".format(current_file, used_line), 
+                sublime.ENCODED_POSITION
+            )
+        elif index == 1:
+            self.view.window().open_file(
+                "{}:{}".format(def_path, def_line), 
+                sublime.ENCODED_POSITION
+            )
+
+    def on_highlight(self, index):
+        if 0 <= index < len(self.items):
+            display, current_file, used_line, def_path, def_line = self.items[index]
+            self.view.window().open_file(
+                "{}:{}".format(current_file, used_line),
+                sublime.ENCODED_POSITION | sublime.TRANSIENT,
+            )
+
+
 class BfmeSymbolBrowserCommand(sublime_plugin.WindowCommand):
     def run(self):
         if not bfme_index and not bfme_strings_index:

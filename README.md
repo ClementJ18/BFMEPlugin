@@ -14,6 +14,8 @@ Once you have indexed you mod you have access to the following functionalities:
 - Basic Highlighting: Once installed you can select SageIni from the list of file types in the bottom right corner
 - Autocomplete symbols: Autocomplete with indexed symbols
 - Autocomplete behaviors: Autocomplete behavior creation and parameters
+- List Defined Symbols: List symbols defined in this file
+- List Referenced Symbols: List symbols Referenced in this file
 
 This small plugin is experimental, it will probably change. 
 
