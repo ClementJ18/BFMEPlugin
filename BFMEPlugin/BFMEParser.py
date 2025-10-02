@@ -727,6 +727,69 @@ class BfmeCompletionListener(sublime_plugin.EventListener):
         )
 
 
+class BfmeCurrentFileSymbolsCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        current_file = self.view.file_name()
+        if not current_file:
+            sublime.status_message("No file currently open")
+            return
+            
+        if not bfme_index and not bfme_strings_index:
+            index_bfme_files_async(self.view.window())
+
+        current_file_symbols = []
+        for name, (path, line, kind, *_) in bfme_index.items():
+            if isinstance(path, list):
+                for i, (p, line_num) in enumerate(zip(path, line)):
+                    if p == current_file:
+                        current_file_symbols.append((name, line_num, kind))
+            else:
+                if path == current_file:
+                    current_file_symbols.append((name, line, kind))
+        
+        for name, (path, line, kind, *_) in bfme_strings_index.items():
+            if path == current_file:
+                current_file_symbols.append((name, line, kind))
+        
+        if not current_file_symbols:
+            sublime.status_message("No symbols found in current file")
+            return
+        
+        current_file_symbols.sort(key=lambda x: (x[2], x[0].lower()))
+        
+        self.items = []
+        for symbol_name, line_num, kind in current_file_symbols:
+            display = "{name}   ⟶   [{kind}] (line {line})".format(
+                name=symbol_name, kind=kind, line=line_num
+            )
+            self.items.append((display, current_file, line_num))
+        
+        self.view.window().show_quick_panel(
+            [item[0] for item in self.items],
+            self.on_done,
+            sublime.KEEP_OPEN_ON_FOCUS_LOST,
+            0,
+            self.on_highlight,
+        )
+
+    def on_done(self, index):
+        if index == -1:
+            return
+        display, file_path, line_num = self.items[index]
+        self.view.window().open_file(
+            "{path}:{line}".format(path=file_path, line=line_num), 
+            sublime.ENCODED_POSITION
+        )
+
+    def on_highlight(self, index):
+        if 0 <= index < len(self.items):
+            display, file_path, line_num = self.items[index]
+            self.view.window().open_file(
+                "{path}:{line}".format(path=file_path, line=line_num),
+                sublime.ENCODED_POSITION | sublime.TRANSIENT,
+            )
+
+
 class BfmeSymbolBrowserCommand(sublime_plugin.WindowCommand):
     def run(self):
         if not bfme_index and not bfme_strings_index:

@@ -2,5 +2,6 @@
   { "caption": "BFME: Reindex Project", "command": "bfme_index_project" },
   { "caption": "BFME: Go to Definition", "command": "goto_bfme_definition" },
   { "caption": "BFME: Show Behavior Documentation", "command": "show_behavior_doc" },
-  { "caption": "BFME: Symbol Browser", "command": "bfme_symbol_browser" }
+  { "caption": "BFME: Symbol Browser", "command": "bfme_symbol_browser" },
+  { "caption": "BFME: Current File Symbols", "command": "bfme_current_file_symbols" }
 ]
