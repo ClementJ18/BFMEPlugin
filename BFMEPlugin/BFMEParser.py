@@ -8,6 +8,8 @@ from .behaviors_data import behaviors
 
 bfme_index = {}
 bfme_strings_index = {}
+_indexing_in_progress = False
+_pending_operations = []
 
 bfme_pattern = re.compile(
     r"^(AudioEvent|MappedImage|Object|ChildObject|ObjectCreationList|ModifierList|FXList|FXParticleSystem|Locomotor|Upgrade|Science|StanceTemplate|CommandSet|CommandButton|Weapon|Armor|SpecialPower)\s+([\w+\-]+)",
@@ -54,21 +56,25 @@ def index_bfme_files(window):
                                     kind, name = m.groups()
                                     if name in bfme_index:
                                         existing = bfme_index[name]
-                                        if isinstance(existing[0], list):
-                                            existing[0].append(path)
-                                            existing[1].append(i + 1)
-                                        else:
-                                            bfme_index[name] = (
-                                                [existing[0], path],
-                                                [existing[1], i + 1],
-                                                kind.lower(),
-                                                tuple(),
+                                        if not is_duplicate_location(existing, path, i + 1):
+                                            if isinstance(existing[0], list):
+                                                existing[0].append(path)
+                                                existing[1].append(i + 1)
+                                                definition_count = len(existing[0])
+                                            else:
+                                                bfme_index[name] = (
+                                                    [existing[0], path],
+                                                    [existing[1], i + 1],
+                                                    kind.lower(),
+                                                    tuple(),
+                                                )
+                                                definition_count = 2
+                                            print(
+                                                "[BFME Plugin] Duplicate symbol found: {name} (now has {count} definitions)".format(
+                                                    name=name, count=definition_count
+                                                )
                                             )
-                                        print(
-                                            "[BFME Plugin] Duplicate symbol found: {name} (now has {count} definitions)".format(
-                                                name=name, count=len(bfme_index[name][0])
-                                            )
-                                        )
+                                        # If it's a duplicate location, we silently skip it
                                     else:
                                         bfme_index[name] = (path, i + 1, kind.lower(), tuple())
 
@@ -77,23 +83,27 @@ def index_bfme_files(window):
                                     macro_name = mm.group(1)
                                     if macro_name in bfme_index:
                                         existing = bfme_index[macro_name]
-                                        if isinstance(existing[0], list):
-                                            existing[0].append(path)
-                                            existing[1].append(i + 1)
-                                            existing[3] = existing[3] + (mm.group(2),)
-                                        else:
-                                            bfme_index[macro_name] = (
-                                                [existing[0], path],
-                                                [existing[1], i + 1],
-                                                "macro",
-                                                existing[3] + (mm.group(2),),
+                                        if not is_duplicate_location(existing, path, i + 1):
+                                            if isinstance(existing[0], list):
+                                                existing[0].append(path)
+                                                existing[1].append(i + 1)
+                                                existing[3] = existing[3] + (mm.group(2),)
+                                                definition_count = len(existing[0])
+                                            else:
+                                                bfme_index[macro_name] = (
+                                                    [existing[0], path],
+                                                    [existing[1], i + 1],
+                                                    "macro",
+                                                    existing[3] + (mm.group(2),),
+                                                )
+                                                definition_count = 2
+                                            print(
+                                                "[BFME Plugin] Duplicate macro found: {macro_name} (now has {count} definitions)".format(
+                                                    macro_name=macro_name,
+                                                    count=definition_count,
+                                                )
                                             )
-                                        print(
-                                            "[BFME Plugin] Duplicate macro found: {macro_name} (now has {count} definitions)".format(
-                                                macro_name=macro_name,
-                                                count=len(bfme_index[macro_name][0]),
-                                            )
-                                        )
+                                        # If it's a duplicate location, we silently skip it
                                     else:
                                         bfme_index[macro_name] = (
                                             path,
@@ -110,9 +120,32 @@ def index_bfme_files(window):
 
 
 def index_bfme_files_async(window):
+    global _indexing_in_progress, _pending_operations
+    
+    if _indexing_in_progress:
+        sublime.status_message("BFME: Indexing already in progress")
+        return
+    
+    _indexing_in_progress = True
+    sublime.status_message("BFME: Indexing started...")
+    
     def worker():
-        index_bfme_files(window)
-        sublime.set_timeout(lambda: sublime.status_message("BFME: Indexing complete"), 0)
+        global _indexing_in_progress, _pending_operations
+        try:
+            index_bfme_files(window)
+        finally:
+            _indexing_in_progress = False
+            
+        def on_complete():
+            sublime.status_message("BFME: Indexing complete")
+            # Process any pending operations that were blocked during indexing
+            if _pending_operations:
+                pending = _pending_operations[:]
+                _pending_operations.clear()
+                for operation in pending:
+                    operation()
+                    
+        sublime.set_timeout(on_complete, 0)
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -165,10 +198,68 @@ def is_behavior_declaration_line(view, location):
     return re.match(r'^\s*Behavior\s*=\s*', line_text, re.I) is not None
 
 
+def can_perform_index_operation(operation=None):
+    """Check if index-dependent operations can proceed."""
+    global _indexing_in_progress, _pending_operations
+    
+    if _indexing_in_progress:
+        if operation:
+            _pending_operations.append(operation)
+            sublime.status_message("BFME: Operation queued - indexing in progress")
+        else:
+            sublime.status_message("BFME: Please wait - indexing in progress")
+        return False
+        
+    if not bfme_index and not bfme_strings_index:
+        sublime.status_message("BFME: Index is empty - please run 'BFME: Reindex project' first")
+        return False
+        
+    return True
+
+
+def is_duplicate_location(existing_entry, new_path, new_line):
+    """Check if the new location already exists in the index entry."""
+    existing_path, existing_line = existing_entry[0], existing_entry[1]
+    
+    if isinstance(existing_path, list):
+        # Multiple locations exist, check if any match
+        for i, (ep, el) in enumerate(zip(existing_path, existing_line)):
+            if ep == new_path and el == new_line:
+                return True
+        return False
+    else:
+        # Single location, check direct match
+        return existing_path == new_path and existing_line == new_line
+
+
+def add_to_index_entry(existing_entry, new_path, new_line, new_kind, additional_data=None):
+    """Add a new location to an existing index entry if it's not a duplicate."""
+    if is_duplicate_location(existing_entry, new_path, new_line):
+        return False  # Duplicate location, don't add
+    
+    existing_path, existing_line = existing_entry[0], existing_entry[1]
+    
+    if isinstance(existing_path, list):
+        # Already multiple locations, append to lists
+        existing_path.append(new_path)
+        existing_line.append(new_line)
+        if additional_data is not None and len(existing_entry) > 3:
+            existing_entry[3] = existing_entry[3] + (additional_data,)
+    else:
+        # Convert single location to multiple locations
+        existing_entry = (
+            [existing_path, new_path],
+            [existing_line, new_line],
+            new_kind,
+            existing_entry[3] + (additional_data,) if additional_data is not None and len(existing_entry) > 3 else existing_entry[3] if len(existing_entry) > 3 else tuple(),
+        )
+    
+    return True  # Successfully added
+
+
 class BfmeIndexProjectCommand(sublime_plugin.WindowCommand):
     def run(self):
         index_bfme_files_async(self.window)
-        sublime.status_message("BFME: Indexing complete")
 
 
 class ShowBehaviorDocCommand(sublime_plugin.TextCommand):
@@ -317,8 +408,8 @@ class ShowBehaviorDocCommand(sublime_plugin.TextCommand):
 
 class GotoBfmeDefinitionCommand(sublime_plugin.TextCommand):
     def run(self, edit):
-        if not bfme_index and not bfme_strings_index:
-            index_bfme_files_async(self.view.window())
+        if not can_perform_index_operation(lambda: self.run(edit)):
+            return
 
         sel = self.view.sel()[0]
 
@@ -540,8 +631,8 @@ class BfmeHoverListener(sublime_plugin.ViewEventListener):
 
 class BfmeQuickLookupCommand(sublime_plugin.WindowCommand):
     def run(self):
-        if not bfme_index and not bfme_strings_index:
-            index_bfme_files_async(self.window)
+        if not can_perform_index_operation(lambda: self.run()):
+            return
 
         self.items = []
         for name, (path, line, kind, *_) in bfme_index.items():
@@ -588,27 +679,39 @@ class BfmeQuickLookupCommand(sublime_plugin.WindowCommand):
 
 class BfmeCompletionListener(sublime_plugin.EventListener):
     def on_query_completions(self, view, prefix, locations):
+        print("[BFME Debug] Completion triggered - prefix: '{}', location: {}".format(prefix, locations[0]))
+        
         syntax = view.settings().get("syntax") or ""
         if not any(
             ext in syntax.lower() for ext in ["ini", "inc", "bfmehighlighter", "plain text"]
         ):
+            print("[BFME Debug] Wrong syntax, exiting: {}".format(syntax))
             return None
 
         scope = view.scope_name(locations[0])
         if any(s in scope for s in ["string", "comment"]):
+            print("[BFME Debug] In string/comment scope, exiting: {}".format(scope))
             return None
 
         if not bfme_index and not bfme_strings_index:
+            print("[BFME Debug] No index, triggering async indexing")
             index_bfme_files_async(view.window())
             return None
 
         location = locations[0]
         line_region = view.line(location)
         line_text = view.substr(line_region)
+        
+        print("[BFME Debug] Line text: '{}'".format(line_text.strip()))
+
+        if len(prefix) == 0:
+            print("[BFME Debug] Empty prefix, skipping completions to prevent {} items".format(len(bfme_index)))
+            return None
 
         completions = []
 
         if is_behavior_declaration_line(view, location):
+            print("[BFME Debug] On behavior declaration line, providing behavior completions")
             for behavior_name in behaviors.keys():
                 if behavior_name.lower().startswith(prefix.lower()):
                     param_count = len(behaviors[behavior_name])
@@ -621,23 +724,15 @@ class BfmeCompletionListener(sublime_plugin.EventListener):
                         ),
                     )
                     completions.append(completion)
-        else:
-            current_behavior = get_current_behavior_context(view, location)
             
-            if current_behavior and current_behavior in behaviors:
-                behavior_params = behaviors[current_behavior]
-                for param_name, param_type in behavior_params.items():
-                    if param_name.lower().startswith(prefix.lower()):
-                        completion = sublime.CompletionItem(
-                            trigger=param_name,
-                            completion=param_name + " = ",
-                            kind=sublime.KIND_VARIABLE,
-                            details="<b>{param}</b><br/><i>{behavior} parameter ({type})</i>".format(
-                                param=param_name, behavior=current_behavior, type=param_type
-                            ),
-                        )
-                        completions.append(completion)
+            completions.sort(key=lambda c: c.trigger.lower())
+            print("[BFME Debug] Returning {} behavior completions".format(len(completions)))
+            return sublime.CompletionList(
+                completions,
+                flags=sublime.INHIBIT_WORD_COMPLETIONS | sublime.INHIBIT_EXPLICIT_COMPLETIONS,
+            )
 
+        print("[BFME Debug] Not on behavior declaration line, processing regular completions")
         context_filter = None
 
         if any(
@@ -655,6 +750,8 @@ class BfmeCompletionListener(sublime_plugin.EventListener):
             context_filter = "audioevent"
         elif any(keyword in line_text.lower() for keyword in ["upgrade", "science"]):
             context_filter = ["upgrade", "science"]
+            
+        print("[BFME Debug] Context filter: {}".format(context_filter))
 
         for name, (path, line_num, kind, extra) in bfme_index.items():
             if name.lower().startswith(prefix.lower()):
@@ -721,6 +818,7 @@ class BfmeCompletionListener(sublime_plugin.EventListener):
 
         completions.sort(key=sort_key)
 
+        print("[BFME Debug] Returning {} total completions".format(len(completions)))
         return sublime.CompletionList(
             completions[:100],
             flags=sublime.INHIBIT_WORD_COMPLETIONS | sublime.INHIBIT_EXPLICIT_COMPLETIONS,
@@ -734,8 +832,8 @@ class BfmeCurrentFileSymbolsCommand(sublime_plugin.TextCommand):
             sublime.status_message("No file currently open")
             return
             
-        if not bfme_index and not bfme_strings_index:
-            index_bfme_files_async(self.view.window())
+        if not can_perform_index_operation(lambda: self.run(edit)):
+            return
 
         current_file_symbols = []
         for name, (path, line, kind, *_) in bfme_index.items():
@@ -797,8 +895,8 @@ class BfmeUsedSymbolsCommand(sublime_plugin.TextCommand):
             sublime.status_message("No file currently open")
             return
             
-        if not bfme_index and not bfme_strings_index:
-            index_bfme_files_async(self.view.window())
+        if not can_perform_index_operation(lambda: self.run(edit)):
+            return
 
         file_content = self.view.substr(sublime.Region(0, self.view.size()))
         lines = file_content.split('\n')
@@ -920,8 +1018,8 @@ class BfmeUsedSymbolsCommand(sublime_plugin.TextCommand):
 
 class BfmeSymbolBrowserCommand(sublime_plugin.WindowCommand):
     def run(self):
-        if not bfme_index and not bfme_strings_index:
-            index_bfme_files_async(self.window)
+        if not can_perform_index_operation(lambda: self.run()):
+            return
 
         self.items = []
 

@@ -1,8 +1,8 @@
 [
-  { "caption": "BFME: Reindex project", "command": "bfme_index_project" },
+  { "caption": "BFME: Browse symbols", "command": "bfme_symbol_browser" },
   { "caption": "BFME: Go to definition", "command": "goto_bfme_definition" },
   { "caption": "BFME: Show behavior documentation", "command": "show_behavior_doc" },
-  { "caption": "BFME: Browse symbols", "command": "bfme_symbol_browser" },
   { "caption": "BFME: List symbols defined in file", "command": "bfme_current_file_symbols" },
-  { "caption": "BFME: List symbols referenced in file", "command": "bfme_used_symbols" }
+  { "caption": "BFME: List symbols referenced in file", "command": "bfme_used_symbols" },
+  { "caption": "BFME: Reindex project", "command": "bfme_index_project" }
 ]
