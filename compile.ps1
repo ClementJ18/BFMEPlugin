@@ -19,3 +19,12 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::CreateFromDirectory($PluginFolder, $OutputFile)
 
 Write-Host "Packaged $PluginFolder into $OutputFile"
+ 
+# Copy package to Sublime Text Installed Packages directory
+$SublimeInstalledPackages = "$env:APPDATA\Sublime Text\Installed Packages"
+if (Test-Path $SublimeInstalledPackages) {
+    Copy-Item $OutputFile -Destination $SublimeInstalledPackages -Force
+    Write-Host "Copied $OutputFile to $SublimeInstalledPackages"
+} else {
+    Write-Host "Sublime Text Installed Packages directory not found: $SublimeInstalledPackages"
+}

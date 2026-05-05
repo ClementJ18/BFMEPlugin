@@ -74,7 +74,6 @@ def index_bfme_files(window):
                                                     name=name, count=definition_count
                                                 )
                                             )
-                                        # If it's a duplicate location, we silently skip it
                                     else:
                                         bfme_index[name] = (path, i + 1, kind.lower(), tuple())
 
@@ -103,7 +102,6 @@ def index_bfme_files(window):
                                                     count=definition_count,
                                                 )
                                             )
-                                        # If it's a duplicate location, we silently skip it
                                     else:
                                         bfme_index[macro_name] = (
                                             path,
@@ -218,43 +216,15 @@ def can_perform_index_operation(operation=None):
 
 
 def is_duplicate_location(existing_entry, new_path, new_line):
-    """Check if the new location already exists in the index entry."""
     existing_path, existing_line = existing_entry[0], existing_entry[1]
     
     if isinstance(existing_path, list):
-        # Multiple locations exist, check if any match
-        for i, (ep, el) in enumerate(zip(existing_path, existing_line)):
+        for ep, el in zip(existing_path, existing_line):
             if ep == new_path and el == new_line:
                 return True
         return False
     else:
-        # Single location, check direct match
         return existing_path == new_path and existing_line == new_line
-
-
-def add_to_index_entry(existing_entry, new_path, new_line, new_kind, additional_data=None):
-    """Add a new location to an existing index entry if it's not a duplicate."""
-    if is_duplicate_location(existing_entry, new_path, new_line):
-        return False  # Duplicate location, don't add
-    
-    existing_path, existing_line = existing_entry[0], existing_entry[1]
-    
-    if isinstance(existing_path, list):
-        # Already multiple locations, append to lists
-        existing_path.append(new_path)
-        existing_line.append(new_line)
-        if additional_data is not None and len(existing_entry) > 3:
-            existing_entry[3] = existing_entry[3] + (additional_data,)
-    else:
-        # Convert single location to multiple locations
-        existing_entry = (
-            [existing_path, new_path],
-            [existing_line, new_line],
-            new_kind,
-            existing_entry[3] + (additional_data,) if additional_data is not None and len(existing_entry) > 3 else existing_entry[3] if len(existing_entry) > 3 else tuple(),
-        )
-    
-    return True  # Successfully added
 
 
 class BfmeIndexProjectCommand(sublime_plugin.WindowCommand):
@@ -464,8 +434,17 @@ class GotoBfmeDefinitionCommand(sublime_plugin.TextCommand):
         lookup = self.view.substr(full_region)
 
         if lookup:
+            # Try to find the symbol with the original lookup
+            found_entry = None
             if lookup in bfme_index:
-                path, line, kind, _ = bfme_index[lookup]
+                found_entry = bfme_index[lookup]
+            elif ":" in lookup and lookup.replace(":", "") in bfme_index:
+                # If not found and contains colon, try without the colon
+                lookup = lookup.replace(":", "")
+                found_entry = bfme_index[lookup]
+            
+            if found_entry:
+                path, line, kind, _ = found_entry
 
                 if isinstance(path, list):
                     if len(path) == 1:
@@ -558,7 +537,7 @@ class BfmeHoverListener(sublime_plugin.ViewEventListener):
                     popup_text,
                     flags=sublime.HIDE_ON_MOUSE_MOVE_AWAY,
                     location=point,
-                    max_width=600,
+                    max_width=1200,
                 )
                 return
 
@@ -678,40 +657,114 @@ class BfmeQuickLookupCommand(sublime_plugin.WindowCommand):
 
 
 class BfmeCompletionListener(sublime_plugin.EventListener):
+    def on_modified(self, view):
+        syntax = view.settings().get("syntax") or ""
+        if not any(ext in syntax.lower() for ext in ["ini", "inc", "bfmehighlighter", "plain text"]):
+            return
+        sel = view.sel()
+        if not sel:
+            return
+        location = sel[0].begin()
+        line_text_before = view.substr(sublime.Region(view.line(location).begin(), location))
+        if re.match(r'#include\s+"[^"]*[/\\]$', line_text_before, re.I):
+            sublime.set_timeout(lambda: view.run_command("auto_complete", {
+                "disable_auto_insert": True,
+                "next_completion_if_showing": False,
+            }), 0)
+
+    def _include_path_completions(self, view, partial_path, prefix):
+        current_file = view.file_name()
+        if not current_file:
+            return None
+
+        current_dir = os.path.dirname(current_file)
+        norm_partial = partial_path.replace('\\', '/')
+
+        if '/' in norm_partial:
+            dir_rel = norm_partial.rsplit('/', 1)[0]
+            search_dir = os.path.normpath(os.path.join(current_dir, dir_rel))
+        else:
+            dir_rel = ''
+            search_dir = current_dir
+
+        if not os.path.isdir(search_dir):
+            return None
+
+        try:
+            raw_entries = os.listdir(search_dir)
+        except OSError:
+            return None
+
+        entries = sorted(
+            raw_entries,
+            key=lambda e: (not os.path.isdir(os.path.join(search_dir, e)), e.lower()),
+        )
+
+        rel_dir = os.path.relpath(search_dir, current_dir).replace('\\', '/')
+        context = rel_dir if rel_dir != '.' else '(current directory)'
+
+        completions = []
+        prefix_lower = prefix.lower()
+
+        for entry in entries:
+            entry_lower = entry.lower()
+            if prefix_lower and not entry_lower.startswith(prefix_lower):
+                continue
+
+            entry_full = os.path.join(search_dir, entry)
+            if os.path.isdir(entry_full):
+                completion = sublime.CompletionItem(
+                    trigger=entry,
+                    completion=entry + '\\',
+                    kind=sublime.KIND_NAVIGATION,
+                    details='<i>[dir] in {}</i>'.format(context),
+                )
+                completions.append(completion)
+            elif entry_lower.endswith(('.ini', '.inc')):
+                completion = sublime.CompletionItem(
+                    trigger=entry,
+                    completion=entry,
+                    kind=sublime.KIND_SNIPPET,
+                    details='<i>[file] in {}</i>'.format(context),
+                )
+                completions.append(completion)
+
+        return sublime.CompletionList(
+            completions,
+            flags=sublime.INHIBIT_WORD_COMPLETIONS | sublime.INHIBIT_EXPLICIT_COMPLETIONS,
+        )
+
     def on_query_completions(self, view, prefix, locations):
-        print("[BFME Debug] Completion triggered - prefix: '{}', location: {}".format(prefix, locations[0]))
-        
         syntax = view.settings().get("syntax") or ""
         if not any(
             ext in syntax.lower() for ext in ["ini", "inc", "bfmehighlighter", "plain text"]
         ):
-            print("[BFME Debug] Wrong syntax, exiting: {}".format(syntax))
-            return None
-
-        scope = view.scope_name(locations[0])
-        if any(s in scope for s in ["string", "comment"]):
-            print("[BFME Debug] In string/comment scope, exiting: {}".format(scope))
-            return None
-
-        if not bfme_index and not bfme_strings_index:
-            print("[BFME Debug] No index, triggering async indexing")
-            index_bfme_files_async(view.window())
             return None
 
         location = locations[0]
         line_region = view.line(location)
+        line_text_before_cursor = view.substr(sublime.Region(line_region.begin(), location))
+
+        include_typing_match = re.match(r'#include\s+"([^"]*)', line_text_before_cursor, re.I)
+        if include_typing_match:
+            return self._include_path_completions(view, include_typing_match.group(1), prefix)
+
+        scope = view.scope_name(locations[0])
+        if any(s in scope for s in ["string", "comment"]):
+            return None
+
+        if not bfme_index and not bfme_strings_index:
+            index_bfme_files_async(view.window())
+            return None
+
         line_text = view.substr(line_region)
-        
-        print("[BFME Debug] Line text: '{}'".format(line_text.strip()))
 
         if len(prefix) == 0:
-            print("[BFME Debug] Empty prefix, skipping completions to prevent {} items".format(len(bfme_index)))
             return None
 
         completions = []
 
         if is_behavior_declaration_line(view, location):
-            print("[BFME Debug] On behavior declaration line, providing behavior completions")
             for behavior_name in behaviors.keys():
                 if behavior_name.lower().startswith(prefix.lower()):
                     param_count = len(behaviors[behavior_name])
@@ -726,13 +779,11 @@ class BfmeCompletionListener(sublime_plugin.EventListener):
                     completions.append(completion)
             
             completions.sort(key=lambda c: c.trigger.lower())
-            print("[BFME Debug] Returning {} behavior completions".format(len(completions)))
             return sublime.CompletionList(
                 completions,
                 flags=sublime.INHIBIT_WORD_COMPLETIONS | sublime.INHIBIT_EXPLICIT_COMPLETIONS,
             )
 
-        print("[BFME Debug] Not on behavior declaration line, processing regular completions")
         context_filter = None
 
         if any(
@@ -750,8 +801,6 @@ class BfmeCompletionListener(sublime_plugin.EventListener):
             context_filter = "audioevent"
         elif any(keyword in line_text.lower() for keyword in ["upgrade", "science"]):
             context_filter = ["upgrade", "science"]
-            
-        print("[BFME Debug] Context filter: {}".format(context_filter))
 
         for name, (path, line_num, kind, extra) in bfme_index.items():
             if name.lower().startswith(prefix.lower()):
@@ -818,7 +867,6 @@ class BfmeCompletionListener(sublime_plugin.EventListener):
 
         completions.sort(key=sort_key)
 
-        print("[BFME Debug] Returning {} total completions".format(len(completions)))
         return sublime.CompletionList(
             completions[:100],
             flags=sublime.INHIBIT_WORD_COMPLETIONS | sublime.INHIBIT_EXPLICIT_COMPLETIONS,
@@ -1063,3 +1111,136 @@ class BfmeSymbolBrowserCommand(sublime_plugin.WindowCommand):
                 "{path}:{line}".format(path=path, line=line),
                 sublime.ENCODED_POSITION | sublime.TRANSIENT,
             )
+
+class EditBfmeDefineCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        region = self.view.line(self.view.sel()[0])
+        line = self.view.substr(region)
+
+        match = re.match(r'#define\s+(\w+)\s+(.+)', line)
+        if not match:
+            sublime.message_dialog("Cursor must be on a valid #define line.")
+            return
+
+        self.region = region
+        self.macro_name = match.group(1)
+        self.values = re.findall(r'\+\S+', match.group(2))
+
+        self.show_main_menu()
+
+    # ---------- UI ----------
+
+    def show_main_menu(self):
+        items = [
+            "Add value",
+            "Subtract value",
+            "Remove value",
+            "List values"
+        ]
+        self.view.window().show_quick_panel(items, self.handle_main_selection)
+
+    def handle_main_selection(self, index):
+        if index == -1:
+            return
+
+        if index == 0:
+            # Add value: show quick panel from index or allow freehand
+            all_symbols = sorted(bfme_index.keys()) if bfme_index else []
+            items = [v for v in all_symbols if "+" + v not in self.values]
+            items.append("[Manual entry]")
+            def on_done_add(idx):
+                if idx == -1:
+                    return
+                if idx == len(items) - 1:
+                    # Manual entry
+                    self.view.window().show_input_panel("Enter value to add (+):", "", lambda val: self.add_value(val), None, None)
+                else:
+                    self.add_value(items[idx])
+            self.view.window().show_quick_panel(items if items else ["[Manual entry]"], on_done_add, sublime.KEEP_OPEN_ON_FOCUS_LOST, 0)
+        elif index == 1:
+            # Subtract value: show quick panel from index or allow freehand
+            all_symbols = sorted(bfme_index.keys()) if bfme_index else []
+            items = [v for v in all_symbols if "-" + v not in self.values]
+            items.append("[Manual entry]")
+            def on_done_subtract(idx):
+                if idx == -1:
+                    return
+                if idx == len(items) - 1:
+                    self.view.window().show_input_panel("Enter value to subtract (-):", "", lambda val: self.add_value(val, subtract=True), None, None)
+                else:
+                    self.add_value(items[idx], subtract=True)
+            self.view.window().show_quick_panel(items if items else ["[Manual entry]"], on_done_subtract, sublime.KEEP_OPEN_ON_FOCUS_LOST, 0)
+        elif index == 2:
+            # Remove value: show quick panel of current values or allow freehand
+            if not self.values:
+                self.view.window().show_input_panel("Enter value to remove:", "", self.remove_value_freehand, None, None)
+                return
+            def on_done_remove(idx):
+                if idx == -1:
+                    return
+                self.remove_value(idx)
+            self.view.window().show_quick_panel(self.values, on_done_remove, sublime.KEEP_OPEN_ON_FOCUS_LOST, 0)
+        elif index == 3:
+            # List values: show searchable quick panel of all values
+            def on_done_list(idx):
+                pass  # No action needed, just for viewing
+            self.view.window().show_quick_panel(self.values if self.values else ["(No values)"] , on_done_list, sublime.KEEP_OPEN_ON_FOCUS_LOST, 0)
+    def remove_value_freehand(self, value):
+        value = value.strip()
+        if not value:
+            return
+        # Remove matching value (with + or - prefix)
+        for i, v in enumerate(self.values):
+            if v.lstrip("+-") == value.lstrip("+-"):
+                self.remove_value(i)
+                return
+        sublime.message_dialog("Value not found.")
+
+    # ---------- Logic ----------
+
+    def add_value(self, value, subtract=False):
+        if not value:
+            return
+
+        token = ("-" if subtract else "+") + value.strip()
+
+        if token in self.values:
+            sublime.message_dialog("Value already exists.")
+            return
+
+        self.values.append(token)
+        self.rewrite_line()
+        self.refresh_values()
+
+    def remove_value(self, index):
+        if index == -1:
+            return
+
+        del self.values[index]
+        self.rewrite_line()
+        self.refresh_values()
+    
+    def refresh_values(self):
+        region = self.region
+        line = self.view.substr(region)
+        match = re.match(r'#define\s+(\w+)\s+(.+)', line)
+        if match:
+            self.values = re.findall(r'[+-]\S+', match.group(2))
+
+    def rewrite_line(self):
+        new_line = "#define {} {}".format(
+            self.macro_name,
+            " ".join(self.values)
+        )
+
+        self.view.run_command("bfme_replace_define_line", {
+            "region_start": self.region.begin(),
+            "region_end": self.region.end(),
+            "text": new_line
+        })
+
+
+class BfmeReplaceDefineLineCommand(sublime_plugin.TextCommand):
+    def run(self, edit, region_start, region_end, text):
+        region = sublime.Region(region_start, region_end)
+        self.view.replace(edit, region, text)
