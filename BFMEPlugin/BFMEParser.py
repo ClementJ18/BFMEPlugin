@@ -3,6 +3,7 @@ import sublime_plugin
 import os
 import re
 import csv
+import subprocess
 import threading
 from .behaviors_data import behaviors
 
@@ -18,6 +19,8 @@ bfme_pattern = re.compile(
 macro_pattern = re.compile(r"^\s*#define\s+([\w+\-]+)\s+([^;]+)", re.I)
 include_pattern = re.compile(r'#include\s+"([^"]+)"', re.I)
 behavior_pattern = re.compile(r'^\s*Behavior\s*=\s*(\w+)', re.I)
+model_line_pattern = re.compile(r'^\s*(?:Model|ModelName|Skeleton)\s*=\s*(\w+)', re.I)
+texture_line_pattern = re.compile(r'^\s*(?:Texture|RandomTexture|UpgradeTexture|ShadowTexture|WeatherTexture)\s*=\s*([\w.]+)', re.I)
 
 
 def read_string_names(path):
@@ -378,13 +381,23 @@ class ShowBehaviorDocCommand(sublime_plugin.TextCommand):
 
 class GotoBfmeDefinitionCommand(sublime_plugin.TextCommand):
     def run(self, edit):
+        sel = self.view.sel()[0]
+        line_region = self.view.line(sel)
+        line_text = self.view.substr(line_region)
+
+        model_match = model_line_pattern.match(line_text)
+        if model_match:
+            self._open_model_folder(model_match.group(1))
+            return
+
+        texture_match = texture_line_pattern.match(line_text)
+        if texture_match:
+            self._open_texture_folder(texture_match.group(1))
+            return
+
         if not can_perform_index_operation(lambda: self.run(edit)):
             return
 
-        sel = self.view.sel()[0]
-
-        line_region = self.view.line(sel)
-        line_text = self.view.substr(line_region)
         include_match = include_pattern.search(line_text)
 
         if include_match:
@@ -489,6 +502,68 @@ class GotoBfmeDefinitionCommand(sublime_plugin.TextCommand):
                 return
 
         sublime.status_message("BFME: No definition found for {lookup}".format(lookup=lookup))
+
+    def _open_model_folder(self, model_name):
+        folders = self.view.window().folders()
+        if not folders:
+            sublime.status_message("BFME: No folder open in project")
+            return
+
+        root = folders[0]
+        prefix = model_name[:2]
+        folder_path = os.path.join(root, '_mod', 'art', 'w3d', prefix)
+
+        if not os.path.isdir(folder_path):
+            sublime.status_message("BFME: Model folder not found: {path}".format(path=folder_path))
+            return
+
+        target_file = None
+        try:
+            for entry in os.listdir(folder_path):
+                if entry.lower() == model_name.lower() + '.w3d':
+                    target_file = os.path.join(folder_path, entry)
+                    break
+        except OSError:
+            pass
+
+        if target_file:
+            subprocess.Popen('explorer /select,"{}"'.format(target_file))
+            sublime.status_message("BFME: Opened folder for model {name}".format(name=model_name))
+        else:
+            subprocess.Popen(['explorer', folder_path])
+            sublime.status_message("BFME: Opened model folder for {name} (no .w3d file found)".format(name=model_name))
+
+    def _open_texture_folder(self, texture_value):
+        base_name = texture_value[:-4] if texture_value.lower().endswith('.tga') else texture_value
+
+        folders = self.view.window().folders()
+        if not folders:
+            sublime.status_message("BFME: No folder open in project")
+            return
+
+        root = folders[0]
+        prefix = base_name[:2]
+        folder_path = os.path.join(root, '_mod', 'art', 'compiledtextures', prefix)
+
+        if not os.path.isdir(folder_path):
+            sublime.status_message("BFME: Texture folder not found: {path}".format(path=folder_path))
+            return
+
+        target_file = None
+        try:
+            for entry in os.listdir(folder_path):
+                if entry.lower() == base_name.lower() + '.dds':
+                    target_file = os.path.join(folder_path, entry)
+                    break
+        except OSError:
+            pass
+
+        if target_file:
+            subprocess.Popen('explorer /select,"{}"'.format(target_file))
+            sublime.status_message("BFME: Opened folder for texture {name}".format(name=base_name))
+        else:
+            subprocess.Popen(['explorer', folder_path])
+            sublime.status_message("BFME: Opened texture folder for {name} (no .dds file found)".format(name=base_name))
 
 
 class BfmeHoverListener(sublime_plugin.ViewEventListener):
