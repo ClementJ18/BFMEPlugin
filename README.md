@@ -1,4 +1,7 @@
 # BFME Plugin
+
+:warning: Retired as will now be built into https://github.com/ClementJ18/sage_ini
+
 A simple plugin for BFME that allows you to traverse ini code more easily
 
 In order for this to work you should add you entire mod folder to sublime text so that the plugin can crawl it.

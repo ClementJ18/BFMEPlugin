@@ -72,11 +72,11 @@ def index_bfme_files(window):
                                                     tuple(),
                                                 )
                                                 definition_count = 2
-                                            print(
-                                                "[BFME Plugin] Duplicate symbol found: {name} (now has {count} definitions)".format(
-                                                    name=name, count=definition_count
-                                                )
-                                            )
+                                            # print(
+                                            #     "[BFME Plugin] Duplicate symbol found: {name} (now has {count} definitions)".format(
+                                            #         name=name, count=definition_count
+                                            #     )
+                                            # )
                                     else:
                                         bfme_index[name] = (path, i + 1, kind.lower(), tuple())
 
@@ -99,12 +99,12 @@ def index_bfme_files(window):
                                                     existing[3] + (mm.group(2),),
                                                 )
                                                 definition_count = 2
-                                            print(
-                                                "[BFME Plugin] Duplicate macro found: {macro_name} (now has {count} definitions)".format(
-                                                    macro_name=macro_name,
-                                                    count=definition_count,
-                                                )
-                                            )
+                                            # print(
+                                            #     "[BFME Plugin] Duplicate macro found: {macro_name} (now has {count} definitions)".format(
+                                            #         macro_name=macro_name,
+                                            #         count=definition_count,
+                                            #     )
+                                            # )
                                     else:
                                         bfme_index[macro_name] = (
                                             path,
